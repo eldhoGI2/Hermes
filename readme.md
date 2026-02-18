@@ -29,11 +29,13 @@ First, install the Git package:
 
 Bash
 apk add git
+
 2. Clone the Repository
 Now, use the standard git clone command. Replace your-username and your-repo with your actual GitHub details:
 
 Bash
-git clone https://github.com/your-username/hermes.git
+git clone https://github.com/eldhoGI2/hermes.git
+
 3. Move the Script to System Path
 Once cloned, enter the folder and move the script so you can use the hermes command from anywhere:
 
