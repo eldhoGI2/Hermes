@@ -8,32 +8,32 @@ from bs4 import BeautifulSoup
 from urllib.parse import quote_plus
 
 # --- CONFIGURATION ---
-VERSION = "3.2.0 (Clean & Deduplicated)"
-DELAY = 1.0  # Seconds to wait between sites
+VERSION = "3.1.0 (Banner Edition)"
+DELAY = 1.5  # Safety delay to prevent blocking
 
 # --- ASCII ART BANNER ---
 BANNER = """
 \033[1;34m
-  _   _   _____   ____    __  __   _____   ____  
- | | | | | ____| |  _ \  |  \/  | | ____| / ___| 
- | |_| | |  _|   | |_) | | |\/| | |  _|   \___ \ 
- |  _  | | |___  |  _ <  | |  | | | |___   ___) |
- |_| |_| |_____| |_| \_\ |_|  |_| |_____| |____/ 
-                                                    
-\033[0m      \033[1;37mv3.2 - The Ultimate Client\033[0m
+
+██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗
+██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██╔════╝
+███████║█████╗  ██████╔╝██╔████╔██║█████╗  ███████╗
+██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ╚════██║
+██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗███████║
+╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝
+                                                   
+\033[0m      \033[1;37mv3.1 - The Ultimate Scraper\033[0m
 """
 
-# The "Clean List" (No dead sites, no blocks)
+# Sites that host BOTH Movies and TV Series
 URLS = [
     "https://hdtodayz.uk",
-    "https://flixhq.to",
-    "https://himovies.to",
-    "https://www.youtube.com/",
-    "https://kitomovies.me",
-    "https://uhd4kmovie.com/"
+    "https://wvv-fmovies.com/home/",
+    "https://ww25.soap2day.day/soap2day-r26n8/",
+    "https://kitomovies.me/home/"
 ]
 
-# --- ROTATING AGENTS ---
+# --- ROTATING AGENTS (To avoid blocking) ---
 USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
@@ -59,45 +59,62 @@ def make_clickable_link(url, text):
     return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
 
 def scrape_site(base_url, query):
-    """Scrapes for Movies AND TV Shows with error handling."""
-    # print(f"\n{BLUE_TXT}Checking {base_url}...{RESET}") # Optional debug line
+    print(f"\n{BLUE_TXT}Checking {base_url}...{RESET}")
     search_url = f"{base_url}/search/{quote_plus(query)}"
     
     try:
-        time.sleep(DELAY) 
-        response = requests.get(search_url, headers=get_headers(), timeout=8)
+        # 1. Request with a high timeout
+        response = requests.get(search_url, headers=get_headers(), timeout=10)
         
-        if response.status_code != 200: return []
+        # DEBUG: Tell me if the site is blocking us
+        if response.status_code == 403:
+            print(f"{YELLOW_TXT}[Blocked by Cloudflare]{RESET}")
+            return []
+        if response.status_code != 200:
+            print(f"{YELLOW_TXT}[Error: {response.status_code}]{RESET}")
+            return []
 
         soup = BeautifulSoup(response.text, 'html.parser')
         items = []
 
-        # Look for multiple common class names for video cards
-        possible_classes = ['flw-item', 'film_list-wrap', 'item', 'movie-item']
+        # 2. THE FIX: Look for MULTIPLE different class names
+        # Different sites use different names for their movie cards.
+        # We join them all into one search.
+        possible_classes = ['flw-item', 'film_list-wrap', 'item', 'movie-item', 'result-item']
+        
         cards = []
         for cls in possible_classes:
             found = soup.find_all('div', class_=cls)
-            if found: cards.extend(found)
+            if found:
+                cards.extend(found)
+        
+        if not cards:
+            print(f"{YELLOW_TXT}[No content found]{RESET}")
 
         for card in cards:
             try:
+                # Try to find the link (a tag)
                 link_tag = card.find('a')
                 if not link_tag: continue
                 
                 title = link_tag.get('title')
-                if not title: title = link_tag.text.strip()
+                if not title: 
+                    # Sometimes title is inside the text, not the attribute
+                    title = link_tag.text.strip()
                 
                 href = link_tag.get('href')
+                
                 if href and not href.startswith('http'):
                     href = base_url + href
                 
                 # Try to find metadata (Year / Quality)
+                # This part is 'fragile' so we wrap it in a broad try/except
                 year = "N/A"
                 info = "Movie/TV"
                 try:
                     meta = card.find_all('span')
-                    if meta: year = meta[0].text.strip()
-                    if len(meta) > 1: info = meta[1].text.strip()
+                    if meta:
+                        year = meta[0].text.strip()
                 except: pass
 
                 items.append({
@@ -105,20 +122,23 @@ def scrape_site(base_url, query):
                     'link': href,
                     'year': year,
                     'info': info,
-                    'source': base_url.split('/')[2]
+                    'source': base_url
                 })
             except: continue
+            
+        print(f"{GREEN_TXT}[Found {len(items)} hits]{RESET}")
         return items
 
-    except Exception:
+    except Exception as e:
+        print(f"{YELLOW_TXT}[Connection Failed: {e}]{RESET}")
         return []
-
 def main():
     # 1. UI SETUP
     clear_screen()
-    print(BANNER)
+    print(BANNER) # <--- The Banner prints here!
     print(f" {BLUE_BG}  SEARCHING MOVIES & TV SHOWS  {RESET}\n")
     
+    # Handle arguments or input
     if len(sys.argv) > 1:
         query = " ".join(sys.argv[1:])
     else:
@@ -126,25 +146,15 @@ def main():
     
     if not query.strip(): sys.exit(1)
 
-    # 2. SCANNING & DEDUPLICATION
-    print(f"\n{YELLOW_TXT}Scanning sources...{RESET}")
-    
+    # 2. SCANNING
+    print(f"\n{YELLOW_TXT}Scanning sources (Agents Active)...{RESET}")
     all_results = []
-    seen_movies = set() # This set tracks what we have already found
     
     for url in URLS:
+        # Print a blue dot for each site scanned
         print(f"{BLUE_TXT}•{RESET}", end="", flush=True) 
         results = scrape_site(url, query)
-        
-        # --- THE DEDUPLICATION LOGIC ---
-        for item in results:
-            # Create a unique ID: "avatar_2009_movie"
-            unique_id = f"{item['title'].lower()}_{item['year']}_{item['info']}"
-            
-            # Only add if we haven't seen this ID before
-            if unique_id not in seen_movies:
-                seen_movies.add(unique_id)
-                all_results.append(item)
+        all_results.extend(results)
     
     print("\n")
 
@@ -155,9 +165,10 @@ def main():
     # 3. SELECTOR MENU
     clear_screen()
     print(BANNER)
-    print(f"{BLUE_BG} FOUND {len(all_results)} UNIQUE RESULTS {RESET}\n")
+    print(f"{BLUE_BG} FOUND {len(all_results)} RESULTS {RESET}\n")
     
     for idx, item in enumerate(all_results):
+        # Display: 1) Title | 2024 | TV/Movie
         print(f"{BLUE_TXT}{idx + 1}){RESET} {item['title']} | {item['year']} | {item['info']}")
 
     try:
@@ -168,17 +179,17 @@ def main():
         print("Invalid selection.")
         sys.exit(1)
 
-    # 4. LAUNCHER SCREEN (Safari Edition)
+    # 4. LAUNCHER SCREEN
     clear_screen()
     print(BANNER)
     print("\n")
     print(f"  {GREEN_TXT}✔  Ready: {selected['title']}{RESET}")
     print("  ==========================================")
     
-    web_link = selected['link']
-    button_text = f"{BLUE_BG}  [ ▶ TAP TO WATCH IN SAFARI ]  {RESET}"
+    vlc_link = f"vlc://{selected['link']}"
+    button_text = f"{BLUE_BG}  [ ▶ TAP TO OPEN IN VLC ]  {RESET}"
     
-    print(f"\n      {make_clickable_link(web_link, button_text)}\n")
+    print(f"\n      {make_clickable_link(vlc_link, button_text)}\n")
     print("  ==========================================")
     print("  Link expires in 15s...")
     time.sleep(15)
